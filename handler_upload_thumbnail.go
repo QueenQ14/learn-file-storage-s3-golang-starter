@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -34,7 +35,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 
 	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
 
-	// TODO: implement the upload here
 	maxMemory := 10 << 20
 	err = r.ParseMultipartForm(int64(maxMemory))
 	if err != nil {
@@ -43,7 +43,16 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 
 	file, fileHeaders, err := r.FormFile("thumbnail")
-	mediaType := fileHeaders.Header.Get("Content-Type")
+	contentTypeHeader := fileHeaders.Header.Get("Content-Type")
+	mediaType, _, err := mime.ParseMediaType(contentTypeHeader)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "invalid content type header", err)
+		return
+	}
+	if mediaType != "image/jpeg" && mediaType != "image/png" {
+		respondWithError(w, http.StatusUnsupportedMediaType, "wrong media type", err)
+		return
+	}
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "error fetching video", err)
@@ -53,7 +62,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusUnauthorized, "unauthorized", err)
 		return
 	}
-	// assets route will be ./assets
+
 	thumbnailPath := fmt.Sprintf("/%s.%s", videoID, strings.TrimPrefix(mediaType, "image/"))
 	imagePath := filepath.Join(cfg.assetsRoot, thumbnailPath)
 	assetFile, err := os.Create(imagePath)

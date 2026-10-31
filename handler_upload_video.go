@@ -71,8 +71,15 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	defer os.Remove(tmpFile.Name())
 	defer tmpFile.Close()
 	written, err := io.Copy(tmpFile, file)
+	processedFilepath, err := processVideoForFastStart(tmpFile.Name())
+	processedFile, err := os.Open(processedFilepath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error processing file", err)
+	}
+	defer os.Remove(processedFile.Name())
+	defer processedFile.Close()
 	fmt.Printf("%v bytes written\n", written)
-	aspectRatio, err := getVideoAspectRatio(tmpFile.Name())
+	aspectRatio, err := getVideoAspectRatio(processedFile.Name())
 	if err != nil {
 		aspectRatio = "other"
 	}
@@ -87,7 +94,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		prefix = "other"
 	}
 
-	tmpFile.Seek(0, io.SeekStart)
+	processedFile.Seek(0, io.SeekStart)
 	randBytes := make([]byte, 32)
 	rand.Read(randBytes)
 	fileName := base64.RawURLEncoding.EncodeToString(randBytes)
@@ -96,7 +103,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
 		Key:         aws.String(videoFileName),
-		Body:        tmpFile,
+		Body:        processedFile,
 		ContentType: aws.String(mediaType),
 	})
 	videoURL := cfg.getObjectURL(videoFileName)

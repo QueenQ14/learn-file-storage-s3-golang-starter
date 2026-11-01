@@ -44,7 +44,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if userID != video.UserID {
-		respondWithError(w, http.StatusUnauthorized, "unauthorized", err)
+		respondWithError(w, http.StatusForbidden, "cannot delete video", err)
 		return
 	}
 	file, fileHeaders, err := r.FormFile("video")
@@ -75,6 +75,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	processedFile, err := os.Open(processedFilepath)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "error processing file", err)
+		return
 	}
 	defer os.Remove(processedFile.Name())
 	defer processedFile.Close()
@@ -98,19 +99,27 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	randBytes := make([]byte, 32)
 	rand.Read(randBytes)
 	fileName := base64.RawURLEncoding.EncodeToString(randBytes)
-	videoFileName := fmt.Sprintf("%s/%s.%s", prefix, fileName, strings.TrimPrefix(mediaType, "video/"))
+	videoFileKey := fmt.Sprintf("%s/%s.%s", prefix, fileName, strings.TrimPrefix(mediaType, "video/"))
 
 	cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
-		Key:         aws.String(videoFileName),
+		Key:         aws.String(videoFileKey),
 		Body:        processedFile,
 		ContentType: aws.String(mediaType),
 	})
-	videoURL := cfg.getObjectURL(videoFileName)
+	videoURL := fmt.Sprintf("%s,%s", cfg.s3Bucket, videoFileKey)
 	video.VideoURL = &videoURL
+	// first update the video with the bucket and key in the DB
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "error updating db", err)
+		return
+	}
+	// we are generating this after so that the presigned URL can stay in memory and we dont care, I think idk man
+	video, err = cfg.dbVideoToSignedVideo(video)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error creating signing url", err)
+		return
 	}
 	respondWithJSON(w, http.StatusOK, video)
 }

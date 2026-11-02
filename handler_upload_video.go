@@ -107,18 +107,11 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		Body:        processedFile,
 		ContentType: aws.String(mediaType),
 	})
-	videoURL := fmt.Sprintf("%s,%s", cfg.s3Bucket, videoFileKey)
+	videoURL := cfg.getVideoURL(videoFileKey)
 	video.VideoURL = &videoURL
-	// first update the video with the bucket and key in the DB
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "error updating db", err)
-		return
-	}
-	// we are generating this after so that the presigned URL can stay in memory and we dont care, I think idk man
-	video, err = cfg.dbVideoToSignedVideo(video)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "error creating signing url", err)
 		return
 	}
 	respondWithJSON(w, http.StatusOK, video)
